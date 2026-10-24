@@ -6,20 +6,40 @@
 <title>YouTube RSS</title>
 <style>
   :root { color-scheme: light dark; --accent: #c4302b; }
-  body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; }
+  body { font-family: system-ui, sans-serif; max-width: 60rem; margin: 4rem auto; padding: 0 1rem; }
   h1 { font-size: 1.5rem; }
   form { display: flex; gap: .5rem; }
-  input { flex: 1; padding: .6rem; font-size: 1rem; }
+  #url { flex: 1; padding: .6rem; font-size: 1rem; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+  .toggle { display: flex; align-items: center; gap: .5rem; font-size: .9rem; cursor: pointer; user-select: none; }
+  .toggle input { appearance: none; margin: 0; width: 2.25rem; height: 1.25rem; border-radius: 1rem; background: color-mix(in srgb, currentColor 30%, transparent); position: relative; cursor: pointer; transition: background .15s; }
+  .toggle input::before { content: ""; position: absolute; top: .15rem; left: .15rem; width: .95rem; height: .95rem; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .toggle input:checked { background: var(--accent); }
+  .toggle input:checked::before { transform: translateX(1rem); }
+  .toggle input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button { padding: .6rem 1rem; font-size: 1rem; background: var(--accent); color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
+  button { min-width: 6rem; }
   button:disabled { opacity: .6; }
-  #result { margin-top: 1.5rem; word-break: break-all; }
+  #result { margin-top: 1.5rem; }
   .error { color: var(--accent); }
+  .label { font-size: .85rem; opacity: .7; margin-bottom: .35rem; }
+  .feed { display: flex; gap: .5rem; }
+  .feed a { flex: 1; min-width: 0; padding: .6rem; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 4px; font-family: ui-monospace, monospace; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .videos { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; }
+  .videos li { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: .5rem; }
+  @media (max-width: 40rem) { .videos { grid-template-columns: 1fr; } }
+  h2 { font-size: 1.25rem; margin: 2rem 0 0; }
+  .videos h3 { font-size: 1rem; font-weight: 600; margin: 0; align-self: end; }
+  .videos img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; }
 </style>
 </head>
 <body>
-<h1>YouTube channel → RSS</h1>
+<header>
+  <h1>YouTube channel → RSS</h1>
+  <label class="toggle">Shorts <input id="shorts" type="checkbox"></label>
+</header>
 <form id="form">
-  <input id="url" type="text" placeholder="https://www.youtube.com/@channel" required autofocus>
+  <input id="url" type="text" placeholder="Any YouTube channel or video URL" required autofocus>
   <button id="go">Convert</button>
 </form>
 <div id="result"></div>
@@ -28,25 +48,78 @@
   const input = document.getElementById('url');
   const button = document.getElementById('go');
   const result = document.getElementById('result');
+  const shorts = document.getElementById('shorts');
+  let hasResult = false;
+
+  try {
+    shorts.checked = localStorage.getItem('shorts') === '1';
+  } catch {}
+
+  shorts.addEventListener('change', () => {
+    try {
+      localStorage.setItem('shorts', shorts.checked ? '1' : '0');
+    } catch {}
+    if (hasResult) form.requestSubmit();
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     button.disabled = true;
     result.textContent = 'Looking up…';
     result.className = '';
+    hasResult = false;
     try {
-      const res = await fetch('/api/feed?url=' + encodeURIComponent(input.value));
+      const res = await fetch('/api/feed?url=' + encodeURIComponent(input.value) + '&hide_shorts=' + !shorts.checked);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       result.innerHTML = '';
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = 'Feed URL';
+      const row = document.createElement('div');
+      row.className = 'feed';
       const a = document.createElement('a');
       a.href = data.feed_url;
+      a.title = data.feed_url;
+      a.target = '_blank';
+      a.rel = 'noopener';
       a.textContent = data.feed_url;
       const copy = document.createElement('button');
+      copy.type = 'button';
       copy.textContent = 'Copy';
-      copy.style.marginLeft = '.5rem';
-      copy.onclick = () => navigator.clipboard.writeText(data.feed_url).then(() => copy.textContent = 'Copied');
-      result.append(a, copy);
+      copy.onclick = () => navigator.clipboard.writeText(data.feed_url).then(() => {
+        copy.textContent = 'Copied';
+        setTimeout(() => copy.textContent = 'Copy', 1500);
+      });
+      row.append(a, copy);
+      result.append(label, row);
+      hasResult = true;
+      if (data.title) {
+        const heading = document.createElement('h2');
+        heading.textContent = data.title;
+        result.append(heading);
+      }
+      if (data.videos.length) {
+        const list = document.createElement('ul');
+        list.className = 'videos';
+        for (const video of data.videos) {
+          const item = document.createElement('li');
+          const title = document.createElement('h3');
+          title.textContent = video.title;
+          const link = document.createElement('a');
+          link.href = video.url;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          const img = document.createElement('img');
+          img.src = video.thumbnail;
+          img.alt = video.title;
+          img.loading = 'lazy';
+          link.append(img);
+          item.append(title, link);
+          list.append(item);
+        }
+        result.append(list);
+      }
     } catch (err) {
       result.textContent = err.message || 'Something went wrong.';
       result.className = 'error';
